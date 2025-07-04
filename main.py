@@ -24,7 +24,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,6 +71,11 @@ def get_connection():
         password="accenture",
         database="your_database"
     )
+
+# === Checking app ===
+@app.get("/test")
+def test():
+    return "Welcome to Guide 2 Govern Application"
 
 # === CHAT ===
 @app.post("/chat")
