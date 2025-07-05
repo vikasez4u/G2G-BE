@@ -30,7 +30,7 @@ jobs:
           source venv/bin/activate
       
       - name: Install dependencies
-        run: pip install -r requirements.txt fastapi "uvicorn[standard]"
+        run: pip install -r requirements.txt
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
@@ -49,7 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     
-    
+    permissions:
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
+
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
@@ -60,10 +63,17 @@ jobs:
         run: unzip release.zip
 
       
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_F6E89FC5E61A4995B2ED2FD75219AAB6 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_2A4B281C3F7B4A688437005CC38C5208 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_BFAE1B5C0D474652BDE110A5280BB43A }}
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
           app-name: 'g2g-be'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_8BE0B56B98CB48B89F710FCC8B053D56 }}
+          
