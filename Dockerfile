@@ -28,6 +28,7 @@ COPY . .
 EXPOSE 8000
 
 # Run FastAPI app
-#CMD ["sleep infinity"]
+#CMD ["sleep", "infinity"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
 
