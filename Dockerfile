@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt  fastapi "uvicorn[standard]"
 
 # Copy application code
 COPY . .
@@ -28,5 +28,6 @@ COPY . .
 EXPOSE 8000
 
 # Run FastAPI app
+#CMD ["sleep infinity"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
