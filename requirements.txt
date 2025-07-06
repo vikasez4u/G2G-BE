@@ -120,3 +120,11 @@ wcwidth==0.2.13
 webcolors==24.11.1
 webencodings==0.5.1
 websocket-client==1.8.0
+mysql-connector-python==9.3.0
+langchain==0.3.26
+langchain-community==0.3.27
+python-docx==1.2.0
+langchain-ollama==0.3.3
+fastembed==0.7.1
+chromadb==1.0.15
+python-multipart==0.0.20
