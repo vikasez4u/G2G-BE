@@ -86,7 +86,11 @@ def test():
 def chat(req: QueryRequest):
     try:
         print("Chain input schema:", chain.input_schema.schema())
-        result = chain.invoke({"input": req.question})
+        result = chain.invoke({
+                                "root": {
+                                        "input": req.question
+                                        }
+                            })
         relevant_docs = retriever.invoke(req.question)
 
         image_ids = []
