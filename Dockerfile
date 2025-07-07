@@ -9,11 +9,15 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Install system dependencies
+
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     curl \
+    unixodbc \
+    unixodbc-dev \
     && rm -rf /var/lib/apt/lists/*
+
 
 # Copy requirements
 COPY requirements.txt .
