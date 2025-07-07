@@ -25,6 +25,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
+    # allow_origins=["http://localhost:5173","http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -193,7 +194,7 @@ def get_history(email: str = Query(...)):
                     "session_id": s['session_id'],
                     "first_message": first_msg['text']
                 })
-        return {"history": history}
+        return {"history": history[:8]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
