@@ -3,6 +3,7 @@ version: '3.8'
 services:
   app:
     build: .
+    image: g2g-api-ollama
     container_name: fastapi_app
     ports:
       - "8000:8000"
@@ -12,6 +13,7 @@ services:
       - OLLAMA_API=http://ollama:11434
     volumes:
       - .:/app
+
 
   ollama:
     image: ollama/ollama
