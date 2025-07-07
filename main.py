@@ -2,7 +2,7 @@ from fastapi import FastAPI, Query, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from typing import List
 import os
@@ -10,6 +10,7 @@ import uuid
 import json
 import shutil
 import re
+import traceback
 import pyodbc 
 from fastapi import Request
 
@@ -46,7 +47,7 @@ class FeedbackRequest(BaseModel):
     response: str
     feedback: str
     session_id: str = str(uuid.uuid4())
-    timestamp: str = datetime.utcnow().isoformat()
+    timestamp: str = datetime.now(timezone.utc).isoformat()
 
 class SignInRequest(BaseModel):
     email: str
@@ -83,36 +84,42 @@ def test():
 # === CHAT ===
 @app.post("/chat")
 def chat(req: QueryRequest):
-    result = chain.invoke({"input": req.question})
-    relevant_docs = retriever.invoke(req.question)
+    try:
+        result = chain.invoke({"input": req.question})
+        relevant_docs = retriever.invoke(req.question)
 
-    image_ids = []
-    related_links = set()
-    seen_ids = set()
+        image_ids = []
+        related_links = set()
+        seen_ids = set()
 
-    for doc in relevant_docs:
-        fname = doc.metadata.get("source")
-        para_idx = doc.metadata.get("para_index")
-        if fname is None or para_idx is None:
-            continue
-        path = os.path.join(DOCUMENTS_FOLDER, fname)
-        triplets = extract_text_image_link_pairs(path)
-        for offset in range(-3, 4):
-            nearby_idx = para_idx + offset
-            if 0 <= nearby_idx < len(triplets):
-                _, imgs, links = triplets[nearby_idx]
-                for i, img in enumerate(imgs):
-                    img_id = f"{fname}::img{nearby_idx}_{i}"
-                    if img_id not in seen_ids:
-                        image_ids.append(img_id)
-                        seen_ids.add(img_id)
-                related_links.update(links)
+        for doc in relevant_docs:
+            fname = doc.metadata.get("source")
+            para_idx = doc.metadata.get("para_index")
+            if fname is None or para_idx is None:
+                continue
+            path = os.path.join(DOCUMENTS_FOLDER, fname)
+            triplets = extract_text_image_link_pairs(path)
+            for offset in range(-3, 4):
+                nearby_idx = para_idx + offset
+                if 0 <= nearby_idx < len(triplets):
+                    _, imgs, links = triplets[nearby_idx]
+                    for i, img in enumerate(imgs):
+                        img_id = f"{fname}::img{nearby_idx}_{i}"
+                        if img_id not in seen_ids:
+                            image_ids.append(img_id)
+                            seen_ids.add(img_id)
+                    related_links.update(links)
 
-    return {
-        "answer": result["answer"],
-        "image_ids": image_ids,
-        "related_links": list(related_links)
-    }
+        return {
+            "answer": result["answer"],
+            "image_ids": image_ids,
+            "related_links": list(related_links)
+        }
+    
+    except Exception as e:
+            traceback.print_exc()
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 @app.post("/signin")
 def signin(user: SignInRequest):
