@@ -122,6 +122,7 @@ webencodings==0.5.1
 websocket-client==1.8.0
 mysql-connector-python==9.3.0
 langchain==0.3.26
+langchain-chroma==0.2.4
 langchain-community==0.3.27
 python-docx==1.2.0
 langchain-ollama==0.3.3
