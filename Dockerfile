@@ -14,31 +14,36 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     curl \
-    gnupg && \
-    curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-    curl https://packages.microsoft.com/config/debian/10/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
-    apt-get update && \
-    ACCEPT_EULA=Y apt-get install -y \
-    msodbcsql17\
+    gnupg \
+    libssl-dev \
+    libffi-dev \
+    && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+    && curl https://packages.microsoft.com/config/debian/10/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update && ACCEPT_EULA=Y apt-get install -y \
+    msodbcsql17 \
     unixodbc \
     unixodbc-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Ollama
+RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Copy requirements
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --upgrade pip && pip install -r requirements.txt  fastapi "uvicorn[standard]"
+RUN pip install --upgrade pip && pip install -r requirements.txt fastapi "uvicorn[standard]"
 
 # Copy application code
 COPY . .
 
-# Expose FastAPI port
-EXPOSE 8000
+# Expose FastAPI port and Ollama port
+EXPOSE 8000 11434
 
-# Run FastAPI app
-#CMD ["sleep", "infinity"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --host 0.0.0.0 --port 8000"]
+
+# Start Ollama and FastAPI app
+CMD ["sh", "-c", "ollama serve & uvicorn main:app --host 0.0.0.0 --port 8000"]
+
 
 
