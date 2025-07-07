@@ -85,6 +85,7 @@ def test():
 @app.post("/chat")
 def chat(req: QueryRequest):
     try:
+        print("Chain input schema:", chain.input_schema.schema())
         result = chain.invoke({"input": req.question})
         relevant_docs = retriever.invoke(req.question)
 

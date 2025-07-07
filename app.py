@@ -102,6 +102,7 @@ def ingest():
 
 
 def build_chain():
+    print("Building Chain")
     model = ChatOllama(model="llama3:2", temperature=0.4)
     embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
     prompt = PromptTemplate.from_template("""
