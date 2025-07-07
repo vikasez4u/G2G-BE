@@ -10,7 +10,8 @@ import uuid
 import json
 import shutil
 import re
-import mysql.connector
+import pyodbc 
+from fastapi import Request
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -25,7 +26,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
-    # allow_origins=["http://localhost:5173","http://localhost:8000"],
+    # allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,11 +67,12 @@ class SessionFetchRequest(BaseModel):
 
 # === DB CONNECTION ===
 def get_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="accenture",
-        database="your_database"
+    return pyodbc.connect(
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "SERVER=clean-prod.database.windows.net;"
+        "DATABASE=G2G_DB;"
+        "UID=clean-db;"
+        "PWD=Innovation@123"
     )
 
 # === Checking app ===
@@ -112,94 +114,214 @@ def chat(req: QueryRequest):
         "related_links": list(related_links)
     }
 
-# === SIGNIN ===
 @app.post("/signin")
 def signin(user: SignInRequest):
+    conn = None
+    cursor = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT IGNORE INTO users (email, username) VALUES (%s, %s)", (user.email, user.username))
+
+        # if user exists
+        cursor.execute("SELECT ID FROM USER_SETTINGS_TABLE WHERE EMAIL_ID = ?", (user.email,))
+        existing_user = cursor.fetchone()
+
+        if not existing_user:
+            # Insert user
+            cursor.execute("""
+                INSERT INTO USER_SETTINGS_TABLE (USER_NAME, EMAIL_ID, CREATED_BY)
+                VALUES (?, ?, ?)
+            """, (user.username, user.email, user.username))
+
         conn.commit()
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cursor.close()
-        conn.close()
+        if cursor: cursor.close()
+        if conn: conn.close()
 
-# === SAVE MESSAGE ===
+
+
 @app.post("/save_message")
 def save_message(msg: MessageSaveRequest):
+    conn = None
+    cursor = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        created_at = datetime.fromisoformat(msg.created_at.replace("Z", ""))
-        cursor.execute("""
-            INSERT INTO messages (session_id, email, sender, text, created_at, image_ids, related_links)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            msg.session_id, msg.email, msg.sender, msg.text, created_at,
-            json.dumps(msg.image_ids), json.dumps(msg.related_links)
-        ))
-        conn.commit()
-        return {"status": "saved"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
 
-# === GET SESSION MESSAGES ===
+        # 🔍 Get user ID using email
+        cursor.execute("SELECT ID FROM USER_SETTINGS_TABLE WHERE EMAIL_ID = ?", (msg.email,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id = result[0]
+
+        # 🕒 Convert timestamp
+        created_at = datetime.fromisoformat(msg.created_at.replace("Z", ""))
+
+        # 📝 Insert into USER_MESSAGES_TABLE
+        cursor.execute("""
+            INSERT INTO USER_MESSAGES_TABLE
+            (USER_ID, SESSION_ID, PROMPTS, MESSAGE, LINKS, CREATE_DATE, CREATED_BY)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            msg.session_id,
+            msg.text,
+            msg.text,
+            json.dumps(msg.related_links),
+            created_at,
+            user_id
+        ))
+
+        # ✅ Get the auto-generated ID of the inserted message
+        message_id = cursor.execute("SELECT @@IDENTITY").fetchval()
+
+        # 🖼️ Save image_ids if any
+        for image_id in msg.image_ids:
+            cursor.execute("""
+                INSERT INTO USER_MESSAGES_IMAGE_TABLE
+                (MESSAGE_ID, IMAGE_ID, CREATE_DATE, CREATED_BY)
+                VALUES (?, ?, ?, ?)
+            """, (
+                message_id,
+                image_id,
+                created_at,
+                user_id
+            ))
+
+        conn.commit()
+        print("✅ Message and associated images saved")
+        return {"status": "saved"}
+
+    except Exception as e:
+        print("❌ Error in /save_message:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+
+
 @app.post("/get_session")
 def get_session(req: SessionFetchRequest):
+    conn = None
+    cursor = None
     try:
         conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT sender, text, created_at, image_ids, related_links FROM messages
-            WHERE session_id = %s AND email = %s ORDER BY created_at ASC
-        """, (req.session_id, req.email))
-        results = cursor.fetchall()
-        for msg in results:
-            msg["image_ids"] = json.loads(msg["image_ids"] or "[]")
-            msg["related_links"] = json.loads(msg["related_links"] or "[]")
-        return {"messages": results, "session_id": req.session_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
+        cursor = conn.cursor()
 
-# === GET HISTORY ===
+        # 🔍 Get user ID from email
+        cursor.execute("SELECT ID FROM USER_SETTINGS_TABLE WHERE EMAIL_ID = ?", (req.email,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id = row[0]
+
+        # 🧾 Fetch messages along with MESSAGE_ID
+        cursor.execute("""
+            SELECT ID, CREATED_BY, MESSAGE, LINKS, CREATE_DATE
+            FROM USER_MESSAGES_TABLE
+            WHERE SESSION_ID = ? AND USER_ID = ?
+            ORDER BY CREATE_DATE ASC
+        """, (req.session_id, user_id))
+
+        results = cursor.fetchall()
+        messages = []
+
+        for row in results:
+            message_id = row[0]
+            sender = row[1]
+            text = row[2]
+            links = row[3]
+            created_at = row[4]
+
+            message_data = {
+                "sender": sender,
+                "text": text,
+                "loading": False,
+                "created_at": created_at.isoformat() if created_at else None
+            }
+
+            if sender == "bot":
+                # 🔗 Parse related links
+                message_data["related_links"] = json.loads(links) if links else []
+
+                # 🖼️ Fetch image_ids from USER_MESSAGES_IMAGE_TABLE
+                cursor.execute("""
+                    SELECT IMAGE_ID FROM USER_MESSAGES_IMAGE_TABLE
+                    WHERE MESSAGE_ID = ?
+                """, (message_id,))
+                image_rows = cursor.fetchall()
+                image_ids = [img_row[0] for img_row in image_rows]
+                message_data["image_ids"] = image_ids
+
+            messages.append(message_data)
+
+        return {"messages": messages, "session_id": req.session_id}
+
+    except Exception as e:
+        print("❌ Exception in /get_session:", e)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+
+
+
 @app.get("/get_history")
 def get_history(email: str = Query(...)):
+    conn = None
+    cursor = None
     try:
         conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
+
+        #  Get USER_ID using email
+        cursor.execute("SELECT ID FROM USER_SETTINGS_TABLE WHERE EMAIL_ID = ?", (email,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id = result[0]
+
+        # Get session IDs and earliest message times for that user
         cursor.execute("""
-            SELECT session_id, MAX(created_at) as last_time FROM messages
-            WHERE email = %s GROUP BY session_id ORDER BY last_time DESC
-        """, (email,))
+            SELECT SESSION_ID, MIN(CREATE_DATE)
+            FROM USER_MESSAGES_TABLE
+            WHERE USER_ID = ?
+            GROUP BY SESSION_ID
+            ORDER BY MIN(CREATE_DATE) DESC
+        """, (user_id,))
         sessions = cursor.fetchall()
         history = []
         for s in sessions:
+            #  Get first message in session
             cursor.execute("""
-                SELECT text FROM messages
-                WHERE email = %s AND session_id = %s AND sender = 'user'
-                ORDER BY created_at ASC LIMIT 1
-            """, (email, s['session_id']))
+                SELECT MESSAGE FROM USER_MESSAGES_TABLE
+                WHERE USER_ID = ? AND SESSION_ID = ?
+                ORDER BY CREATE_DATE ASC
+            """, (user_id, s[0]))
             first_msg = cursor.fetchone()
             if first_msg:
                 history.append({
-                    "session_id": s['session_id'],
-                    "first_message": first_msg['text']
+                    "session_id": s[0],
+                    "first_message": first_msg[0]
                 })
         return {"history": history[:8]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cursor.close()
-        conn.close()
+        if cursor: cursor.close()
+        if conn: conn.close()
+
 
 # === IMAGE ENDPOINT ===
 @app.get("/image")
