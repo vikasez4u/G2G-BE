@@ -81,12 +81,38 @@ def get_connection():
 def test():
     return "Welcome to Guide 2 Govern Application"
 
+
+@app.post("/ask")
+async def ask_ollama(request: Request):
+    body = await request.json()
+    prompt = body.get("prompt", "")
+
+    response = requests.post("http://ollama:11434/api/generate", json={
+        "model": "llama3",
+        "prompt": prompt
+    })
+    return response.json()
+
+
 # === CHAT ===
 @app.post("/chat")
 def chat(req: QueryRequest):
     try:
         print("Chain input schema:", chain.input_schema.schema())
-        result = chain.invoke({"input": req.question})
+
+        # Try using the chain first
+        try:
+            result = chain.invoke({"input": req.question})
+            answer = result["answer"]
+        except Exception as chain_error:
+            print("Chain failed, falling back to Ollama:", chain_error)
+            response = requests.post("http://ollama:11434/api/generate", json={
+                "model": "llama3",
+                "prompt": req.question
+            })
+            response.raise_for_status()
+            answer = response.json().get("response", "")
+
         relevant_docs = retriever.invoke(req.question)
 
         image_ids = []
@@ -112,14 +138,14 @@ def chat(req: QueryRequest):
                     related_links.update(links)
 
         return {
-            "answer": result["answer"],
+            "answer": answer,
             "image_ids": image_ids,
             "related_links": list(related_links)
         }
-    
+
     except Exception as e:
-            traceback.print_exc()
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.post("/signin")

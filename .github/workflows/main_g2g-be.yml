@@ -21,9 +21,10 @@ jobs:
     - name: Log in to Azure Container Registry (ACR)
       run: az acr login --name g2gdocker
 
-    - name: Build Docker image
+    - name: Build and tag Docker image using docker-compose
       run: |
-        docker build -t g2gdocker.azurecr.io/g2gdockerimage:v1 .
+        docker-compose -f docker-compose.yml build app
+        docker tag app g2gdocker.azurecr.io/g2gdockerimage:v1
 
     - name: Push Docker image to ACR
       run: |

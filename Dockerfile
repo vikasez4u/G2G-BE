@@ -1,3 +1,4 @@
+
 # Base image with Python
 FROM python:3.13-slim
 
@@ -25,9 +26,6 @@ RUN apt-get update && apt-get install -y \
     unixodbc-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama
-RUN curl -fsSL https://ollama.com/install.sh | sh
-
 # Copy requirements
 COPY requirements.txt .
 
@@ -37,13 +35,8 @@ RUN pip install --upgrade pip && pip install -r requirements.txt fastapi "uvicor
 # Copy application code
 COPY . .
 
-# Expose FastAPI port and Ollama port
-EXPOSE 8000 11434
+# Expose FastAPI port
+EXPOSE 8000
 
-# --host 0.0.0.0 --port 8000"]
-
-# Start Ollama and FastAPI app
-CMD ["sh", "-c", "ollama serve & uvicorn main:app --host 0.0.0.0 --port 8000"]
-
-
-
+# Start FastAPI app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
