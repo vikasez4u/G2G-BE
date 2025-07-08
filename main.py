@@ -13,6 +13,7 @@ import re
 import traceback
 import pyodbc 
 from fastapi import Request
+import requests
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
