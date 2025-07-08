@@ -1,0 +1,49 @@
+name: Trigger auto deployment for g2g-be-container
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ main ]
+    paths:
+    - '**'
+    - '.github/workflows/g2g-be-container-AutoDeployTrigger-2a51ad86-344b-40e5-8980-61bb3667f340.yml'
+
+  # Allow manual trigger 
+  workflow_dispatch:      
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions: 
+      id-token: write #This is required for requesting the OIDC JWT Token
+      contents: read #Required when GH token is used to authenticate with private repo
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.G2GBECONTAINER_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.G2GBECONTAINER_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.G2GBECONTAINER_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push container image to registry
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}
+          _dockerfilePathKey_: _dockerfilePath_
+          _targetLabelKey_: _targetLabel_
+          registryUrl: g2gdocker.azurecr.io
+          registryUsername: ${{ secrets.G2GBECONTAINER_REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.G2GBECONTAINER_REGISTRY_PASSWORD }}
+          containerAppName: g2g-be-container
+          resourceGroup: G2G-KH-LLM
+          imageToBuild: g2gdocker.azurecr.io/g2g-be-container:${{ github.sha }}
+          _buildArgumentsKey_: |
+            _buildArgumentsValues_
+
+
