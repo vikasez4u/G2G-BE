@@ -118,7 +118,7 @@ async def ask_ollama(request: Request):
     prompt = body.get("prompt", "")
 
     response = requests.post("http://ollama:11434/api/generate", json={
-        "model": "llama3",
+        "model": "llama3.2",
         "prompt": prompt
     })
     return response.json()
@@ -152,7 +152,7 @@ def chat(req: QueryRequest):
         except Exception as chain_error:
             print("Chain failed, falling back to Ollama:", chain_error)
             response = requests.post("http://ollama:11434/api/generate", json={
-                "model": "llama3",
+                "model": "llama3.2",
                 "prompt": req.question
             })
             response.raise_for_status()
