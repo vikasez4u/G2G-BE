@@ -149,7 +149,7 @@ def chat(req: QueryRequest):
         print("Input schema:", chain.input_schema.schema())
 
         # Cached document retrieval
-        docs = cached_retrieve(user_input, retriever)
+        docs = cached_retrieve(user_input)
         context = "\n".join([doc.page_content for doc in docs])
 
         answer = "" 

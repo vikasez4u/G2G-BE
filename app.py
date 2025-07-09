@@ -15,9 +15,12 @@ from functools import lru_cache
 
 #import streamlit as st
 
-
 CHROMA_DB_DIR = "./sql_chroma_db"
 DOCUMENTS_FOLDER = "./documents"
+
+embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+vectorstore = Chroma(persist_directory="CHROMA_DB_DIR", embedding_function=embedder)
+retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3, "fetch_k": 6, "lambda_mult": 0.8})
 
 def extract_text_image_link_pairs(doc_path):
     from lxml import etree
@@ -83,7 +86,6 @@ def ingest():
     all_chunks = []
     
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
     for filename in os.listdir(DOCUMENTS_FOLDER):
         if filename.endswith(".docx"):
@@ -114,7 +116,6 @@ def build_chain():
             "repeat_penalty": 1.1
         }
 )
-    embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
     prompt = PromptTemplate.from_template("""
 You are a professional and friendly virtual assistant for Accenture.
 
@@ -142,16 +143,15 @@ Context:
 Answer:
 """)
 
-
-    vector_store = Chroma(persist_directory=CHROMA_DB_DIR, embedding_function=embedder)
     retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3, "fetch_k": 6, "lambda_mult": 0.8})
     doc_chain = create_stuff_documents_chain(model, prompt)
     # return create_retrieval_chain(retriever, doc_chain), retriever
     return create_retrieval_chain(retriever, doc_chain), retriever, model
 
 @lru_cache(maxsize=128)
-def cached_retrieve(query: str):
-    return retriever.invoke(query)
+def cached_retrieve(user_input: str):
+    return retriever.get_relevant_documents(user_input)
+
 
 ingest()
 chat_chain, chat_retriever,llm = build_chain()
