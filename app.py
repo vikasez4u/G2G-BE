@@ -19,7 +19,7 @@ CHROMA_DB_DIR = "./sql_chroma_db"
 DOCUMENTS_FOLDER = "./documents"
 
 embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
-vectorstore = Chroma(persist_directory="CHROMA_DB_DIR", embedding_function=embedder)
+vector_store = Chroma(persist_directory="CHROMA_DB_DIR", embedding_function=embedder)
 retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3, "fetch_k": 6, "lambda_mult": 0.8})
 
 def extract_text_image_link_pairs(doc_path):
