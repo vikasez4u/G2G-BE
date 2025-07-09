@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, HTTPException, UploadFile, File
+from fastapi import FastAPI, Query, HTTPException, UploadFile, File, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -22,17 +22,28 @@ from langchain_community.chat_models import ChatOllama
 
 from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER
 
+import jwt
+from jwt import PyJWKClient
+
+import os
+
 # === INIT ===
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
-    # allow_origins=["http://localhost:5173"],
+    #allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+TENANT_ID = "18bea863-348d-41f2-b82b-6162e1822bbb"
+AUDIENCE = "18bea863-348d-41f2-b82b-6162e1822bbb"
+#AUDIENCE = f"api://18bea863-348d-41f2-b82b-6162e1822bbb/user_impersonation"
+JWKS_URL = f"https://login.microsoftonline.com/6eb54db1-fc6e-4b0a-a00b-930182dca624/discovery/v2.0/keys"
+ISSUER = f"https://login.microsoftonline.com/6eb54db1-fc6e-4b0a-a00b-930182dca624/v2.0"
 
 UPLOAD_DIR = "./uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -78,9 +89,27 @@ def get_connection():
     )
 
 # === Checking app ===
+@app.get("/")
 @app.get("/test")
 def test():
     return "Welcome to Guide 2 Govern Application"
+
+def validate_token(token: str):
+    try:
+        jwks_client = PyJWKClient(JWKS_URL)
+        signing_key = jwks_client.get_signing_key_from_jwt(token).key
+        payload = jwt.decode(
+            token,
+            signing_key,
+            algorithms=["RS256"],
+            audience=AUDIENCE,
+            issuer=ISSUER
+        )
+        return payload
+    except Exception as e:
+        print("Token validation error:", e)  # Add this line for debugging
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 
 
 @app.post("/ask")
@@ -93,6 +122,21 @@ async def ask_ollama(request: Request):
         "prompt": prompt
     })
     return response.json()
+
+
+@app.post("/api/login")
+def login(authorization: str = Header(...)):
+    token = authorization.split("Bearer ")[-1]
+    user = validate_token(token)
+    #print("User authenticated:", user)
+    return {
+        "status": "success",
+        "message": "User authenticated successfully",
+        "user": {
+            "email": user.get("preferred_username"),
+            "name": user.get("name")
+        }
+    }
 
 
 # === CHAT ===

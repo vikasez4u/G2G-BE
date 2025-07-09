@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --upgrade pip && pip install -r requirements.txt fastapi "uvicorn[standard]"
+RUN pip install --upgrade pip && pip install -r requirements.txt fastapi "uvicorn[standard]" PyJWT
 
 # Copy application code
 COPY . .

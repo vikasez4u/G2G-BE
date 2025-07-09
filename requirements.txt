@@ -129,3 +129,4 @@ fastembed==0.7.1
 chromadb==1.0.15
 python-multipart==0.0.20
 pyodbc==5.2.0
+cryptography==45.0.5
