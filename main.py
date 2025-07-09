@@ -121,7 +121,14 @@ async def ask_ollama(request: Request):
         "model": "llama3.2",
         "prompt": prompt
     })
-    return response.json()
+    print("Ollama response status:", response.status_code)
+    print("Ollama response text:", response.text)
+    response.raise_for_status()
+    try:
+        return response.json()
+    except json.JSONDecodeError:
+        print("Ollama returned invalid JSON:", response.text)
+        raise HTTPException(status_code=502, detail="Ollama returned invalid response")
 
 
 @app.post("/api/login")

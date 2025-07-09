@@ -20,6 +20,7 @@ services:
       - ollama
     environment:
       - OLLAMA_HOST=http://ollama:11434
+       - DOCUMENTS_FOLDER=/app/uploaded_docs
     restart: unless-stopped
 
 volumes:
