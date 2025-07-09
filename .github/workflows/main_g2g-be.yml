@@ -1,9 +1,9 @@
-name: Build and Deploy to Azure Web App and Container App
+name: Build and Deploy to Azure Web App
 
 on:
   push:
     branches:
-      - main
+      - main  # or your deployment branch
 
 jobs:
   build-and-deploy:
@@ -35,15 +35,6 @@ jobs:
     - name: Push Docker image to ACR
       run: |
         docker push g2gdocker.azurecr.io/g2gdockerimage:v1
-
-    - name: Deploy to Azure Container App
-      run: |
-        az containerapp update \
-          --name g2g-be-container \
-          --resource-group G2G-KH-LLM \
-          --image g2gdocker.azurecr.io/g2gdockerimage:v1 \
-          --ingress external \
-          --target-port 8080
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
