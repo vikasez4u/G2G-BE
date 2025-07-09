@@ -1,31 +1,26 @@
-from fastapi import FastAPI, Query, HTTPException, UploadFile, File, Depends, Header
+from fastapi import FastAPI, Query, HTTPException, UploadFile, File, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import List
-import os
+import requests, os, traceback
 import uuid
 import json
 import shutil
 import re
-import traceback
-import pyodbc 
-from fastapi import Request
-import requests
+import pyodbc
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable
 from langchain_community.chat_models import ChatOllama
 
-from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER
+from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER, cached_retrieve
 
 import jwt
 from jwt import PyJWKClient
-
-import os
 
 # === INIT ===
 app = FastAPI()
@@ -150,23 +145,37 @@ def login(authorization: str = Header(...)):
 @app.post("/chat")
 def chat(req: QueryRequest):
     try:
-        print("Chain input schema:", chain.input_schema.schema())
+        user_input = req.question
+        print("Input schema:", chain.input_schema.schema())
 
-        # Try using the chain first
+        # Cached document retrieval
+        docs = cached_retrieve(user_input, retriever)
+        context = "\n".join([doc.page_content for doc in docs])
+
+        answer = "" 
+
+        # Try LangChain first
         try:
-            result = chain.invoke({"input": req.question})
-            answer = result["answer"]
+            answer = ""
+            for chunk in chain.stream({"input": user_input, "context": context}):
+                answer += chunk.content
         except Exception as chain_error:
             print("Chain failed, falling back to Ollama:", chain_error)
-            response = requests.post("http://ollama:11434/api/generate", json={
-                "model": "llama3.2",
-                "prompt": req.question
+            response = requests.post("http://localhost:11434/api/generate", json={
+                "model": "llama3",
+                "prompt": user_input,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 200,
+                    "repeat_penalty": 1.1
+                },
+                "stream": False
             })
             response.raise_for_status()
             answer = response.json().get("response", "")
 
-        relevant_docs = retriever.invoke(req.question)
-
+        # Image/link processing (same as before)
+        relevant_docs = docs
         image_ids = []
         related_links = set()
         seen_ids = set()
@@ -189,6 +198,7 @@ def chat(req: QueryRequest):
                             seen_ids.add(img_id)
                     related_links.update(links)
 
+        # ✅ Now return all together
         return {
             "answer": answer,
             "image_ids": image_ids,
@@ -198,7 +208,7 @@ def chat(req: QueryRequest):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
-
+    
 
 @app.post("/signin")
 def signin(user: SignInRequest):

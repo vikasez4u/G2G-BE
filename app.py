@@ -11,6 +11,9 @@ from langchain.chains import create_retrieval_chain
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain.docstore.document import Document as LCDocument
 from xml.etree.ElementTree import tostring
+from functools import lru_cache
+
+#import streamlit as st
 
 
 CHROMA_DB_DIR = "./sql_chroma_db"
@@ -101,25 +104,34 @@ def ingest():
     print("✅ Chroma DB created and persisted.")
 
 
+
 def build_chain():
     print("Building Chain")
-    model = ChatOllama(model="llama3.2", temperature=0.4)
+    model = ChatOllama(model="llama3.2", temperature=0.4,
+                       options={
+            "num_predict": 200,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1
+        }
+)
     embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
     prompt = PromptTemplate.from_template("""
-You are a friendly and helpful virtual assistant for Accenture.
-Your tone must be warm, professional, and formal at all times.
-Behavior Rules:
-Greet the user only at the start of the first conversation with a friendly tone. Use "Hello" only once.
-During the conversation:
-Do not repeat greetings (e.g., no "hello" or "thank you" mid-chat).
-Answer questions accurately, concisely, and contextually.
-Stick strictly to the user's question and context.
-Use bullet points when the answer involves multiple parts.
-Give detailed explanations only if the user asks for them.
-Use emojis sparingly to remain warm yet professional.
-Provide links or images only if directly relevant to the question.
-Offer help proactively if it’s the user’s first message or beginning of a conversation.
-End the conversation with a polite thank-you and positive closing.
+You are a professional and friendly virtual assistant for Accenture.
+
+Tone: Warm, formal, helpful.
+
+Behavior Guidelines:
+- Greet only at the beginning with a single “Hello.”
+- Avoid repeated greetings or expressions of thanks mid-chat.
+- Base every answer strictly on the provided documents—do not use prior knowledge.
+- If unsure, say "Reach out to Respective POCs"—no assumptions or invented facts.
+- Be concise and contextual.
+- Give detailed explanations only when requested.
+- Use bullet points for multi-part answers.
+- Use emojis sparingly and only when enhancing clarity or warmth.
+- Include links/images from provided documents only if clearly relevant to the user's question.
+- Offer help proactively only if the conversation is just beginning.
+- End with a polite thank-you and positive closing.
 
 Input:
 {input}
@@ -130,13 +142,23 @@ Context:
 Answer:
 """)
 
+
     vector_store = Chroma(persist_directory=CHROMA_DB_DIR, embedding_function=embedder)
     retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3, "fetch_k": 6, "lambda_mult": 0.8})
     doc_chain = create_stuff_documents_chain(model, prompt)
     # return create_retrieval_chain(retriever, doc_chain), retriever
     return create_retrieval_chain(retriever, doc_chain), retriever, model
 
+@lru_cache(maxsize=128)
+def cached_retrieve(query: str):
+    return retriever.invoke(query)
+
 ingest()
 chat_chain, chat_retriever,llm = build_chain()
 
-
+#query = st.text_input("Ask a question:")
+#if query:
+#    chat_chain, chat_retriever,llm = build_chain()
+#    response = chat_chain.invoke({"input": query})
+#    st.write("### Answer")
+#    st.write(response)
