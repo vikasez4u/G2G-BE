@@ -12,7 +12,8 @@ services:
 
   app:
     build: .
-    container_name: g2g-ollama-app
+    image: g2g-ollama-app
+    container_name: g2g-app
     ports:
       - "8000:8000"
     depends_on:
