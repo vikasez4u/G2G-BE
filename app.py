@@ -3,7 +3,7 @@ from io import BytesIO
 from PIL import Image
 from docx import Document
 from langchain_ollama import ChatOllama
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
