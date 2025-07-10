@@ -158,7 +158,10 @@ def chat(req: QueryRequest):
         try:
             answer = ""
             for chunk in chain.stream({"input": user_input, "context": context}):
-                answer += chunk.page_content
+                print("Chunk type:", type(chunk))
+                print("Chunk value:", chunk)
+                # Try to access page_content if it exists, else use str(chunk)
+                answer += getattr(chunk, "page_content", str(chunk))
         except Exception as chain_error:
             print("Chain failed, falling back to Ollama:", chain_error)
             response = requests.post("http://localhost:11434/api/generate", json={
