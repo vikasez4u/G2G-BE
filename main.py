@@ -158,9 +158,12 @@ def chat(req: QueryRequest):
         try:
             answer = ""
             for chunk in chain.stream({"input": user_input, "context": context}):
-                # If chunk is a dict with 'answer', use that. Otherwise, fallback to str(chunk)
-                if isinstance(chunk, dict) and "answer" in chunk:
-                    answer += chunk["answer"]
+                # Only add to answer if chunk has a non-empty 'answer' key
+                if isinstance(chunk, dict):
+                    if chunk.get("answer"):
+                        answer += chunk["answer"]
+                    elif not set(chunk.keys()).issubset({"input", "context"}):
+                        answer += str(chunk)
                 else:
                     answer += str(chunk)
         except Exception as chain_error:
