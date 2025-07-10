@@ -160,9 +160,17 @@ def chat(req: QueryRequest):
             for chunk in chain.stream({"input": user_input, "context": context}):
                 # Only add to answer if chunk has a non-empty 'answer' key
                 if isinstance(chunk, dict):
-                    if chunk.get("answer"):
+                    # Add only if 'answer' exists and is not empty
+                    if "answer" in chunk and chunk["answer"]:
                         answer += chunk["answer"]
-                    elif not set(chunk.keys()).issubset({"input", "context"}):
+                    # Ignore dicts with only 'answer' key and empty value
+                    elif set(chunk.keys()) == {"answer"}:
+                        continue
+                    # Ignore dicts with only 'input' or 'context' keys
+                    elif set(chunk.keys()).issubset({"input", "context"}):
+                        continue
+                    else:
+                        # For any other dict, add its string representation
                         answer += str(chunk)
                 else:
                     answer += str(chunk)
