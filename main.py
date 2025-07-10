@@ -25,8 +25,8 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
-    # allow_origins=["http://localhost:5173"],
+    # allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -160,7 +160,7 @@ def save_message(msg: MessageSaveRequest):
 
         # 🕒 Convert timestamp
         created_at = datetime.fromisoformat(msg.created_at.replace("Z", ""))
-
+        prompt_with_sender = f"{msg.sender}|{msg.text}"
         # 📝 Insert into USER_MESSAGES_TABLE
         cursor.execute("""
             INSERT INTO USER_MESSAGES_TABLE
@@ -169,7 +169,7 @@ def save_message(msg: MessageSaveRequest):
         """, (
             user_id,
             msg.session_id,
-            msg.text,
+            prompt_with_sender,
             msg.text,
             json.dumps(msg.related_links),
             created_at,
@@ -224,7 +224,7 @@ def get_session(req: SessionFetchRequest):
 
         # 🧾 Fetch messages along with MESSAGE_ID
         cursor.execute("""
-            SELECT ID, CREATED_BY, MESSAGE, LINKS, CREATE_DATE
+            SELECT ID, CREATED_BY, PROMPTS, MESSAGE, LINKS, CREATE_DATE
             FROM USER_MESSAGES_TABLE
             WHERE SESSION_ID = ? AND USER_ID = ?
             ORDER BY CREATE_DATE ASC
@@ -233,25 +233,29 @@ def get_session(req: SessionFetchRequest):
         results = cursor.fetchall()
         messages = []
 
+        # ...inside get_session...
         for row in results:
             message_id = row[0]
-            sender = row[1]
-            text = row[2]
-            links = row[3]
-            created_at = row[4]
+            prompt_with_sender = row[2]  # PROMPTS
+            text = row[3]                # MESSAGE
+            links = row[4]
+            created_at = row[5]
+
+            # Extract sender from PROMPTS
+            if "|" in prompt_with_sender:
+                sender_type, _ = prompt_with_sender.split("|", 1)
+            else:
+                sender_type = "user"  # fallback
 
             message_data = {
-                "sender": sender,
+                "sender": sender_type,
                 "text": text,
                 "loading": False,
                 "created_at": created_at.isoformat() if created_at else None
             }
 
-            if sender == "bot":
-                # 🔗 Parse related links
+            if sender_type == "bot":
                 message_data["related_links"] = json.loads(links) if links else []
-
-                # 🖼️ Fetch image_ids from USER_MESSAGES_IMAGE_TABLE
                 cursor.execute("""
                     SELECT IMAGE_ID FROM USER_MESSAGES_IMAGE_TABLE
                     WHERE MESSAGE_ID = ?
@@ -261,12 +265,10 @@ def get_session(req: SessionFetchRequest):
                 message_data["image_ids"] = image_ids
 
             messages.append(message_data)
-
         return {"messages": messages, "session_id": req.session_id}
 
     except Exception as e:
         print("❌ Exception in /get_session:", e)
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
     finally:
