@@ -1,36 +1,44 @@
-from fastapi import FastAPI, Query, HTTPException, UploadFile, File
+from fastapi import FastAPI, Query, HTTPException, UploadFile, File, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from typing import List
-import os
+import requests, os, traceback
 import uuid
 import json
 import shutil
 import re
-import pyodbc 
-from fastapi import Request
+import pyodbc
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable
 from langchain_community.chat_models import ChatOllama
 
-from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER
+from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER, cached_retrieve
+
+import jwt
+from jwt import PyJWKClient
 
 # === INIT ===
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
+    # allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+TENANT_ID = "18bea863-348d-41f2-b82b-6162e1822bbb"
+AUDIENCE = "18bea863-348d-41f2-b82b-6162e1822bbb"
+#AUDIENCE = f"api://18bea863-348d-41f2-b82b-6162e1822bbb/user_impersonation"
+JWKS_URL = f"https://login.microsoftonline.com/6eb54db1-fc6e-4b0a-a00b-930182dca624/discovery/v2.0/keys"
+ISSUER = f"https://login.microsoftonline.com/6eb54db1-fc6e-4b0a-a00b-930182dca624/v2.0"
 
 UPLOAD_DIR = "./uploaded_docs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -46,7 +54,7 @@ class FeedbackRequest(BaseModel):
     response: str
     feedback: str
     session_id: str = str(uuid.uuid4())
-    timestamp: str = datetime.utcnow().isoformat()
+    timestamp: str = datetime.now(timezone.utc).isoformat()
 
 class SignInRequest(BaseModel):
     email: str
@@ -76,43 +84,146 @@ def get_connection():
     )
 
 # === Checking app ===
+@app.get("/")
 @app.get("/test")
 def test():
     return "Welcome to Guide 2 Govern Application"
 
+def validate_token(token: str):
+    try:
+        jwks_client = PyJWKClient(JWKS_URL)
+        signing_key = jwks_client.get_signing_key_from_jwt(token).key
+        payload = jwt.decode(
+            token,
+            signing_key,
+            algorithms=["RS256"],
+            audience=AUDIENCE,
+            issuer=ISSUER
+        )
+        return payload
+    except Exception as e:
+        print("Token validation error:", e)  # Add this line for debugging
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+
+@app.post("/ask")
+async def ask_ollama(request: Request):
+    body = await request.json()
+    prompt = body.get("prompt", "")
+
+    response = requests.post("http://ollama:11434/api/generate", json={
+        "model": "llama3.2",
+        "prompt": prompt
+    })
+    print("Ollama response status:", response.status_code)
+    print("Ollama response text:", response.text)
+    response.raise_for_status()
+    try:
+        return response.json()
+    except json.JSONDecodeError:
+        print("Ollama returned invalid JSON:", response.text)
+        raise HTTPException(status_code=502, detail="Ollama returned invalid response")
+
+
+@app.post("/api/login")
+def login(authorization: str = Header(...)):
+    token = authorization.split("Bearer ")[-1]
+    user = validate_token(token)
+    #print("User authenticated:", user)
+    return {
+        "status": "success",
+        "message": "User authenticated successfully",
+        "user": {
+            "email": user.get("preferred_username"),
+            "name": user.get("name")
+        }
+    }
+
+
 # === CHAT ===
 @app.post("/chat")
 def chat(req: QueryRequest):
-    result = chain.invoke({"input": req.question})
-    relevant_docs = retriever.invoke(req.question)
+    try:
+        user_input = req.question
+        print("Input schema:", chain.input_schema.schema())
 
-    image_ids = []
-    related_links = set()
-    seen_ids = set()
+        # Cached document retrieval
+        docs = cached_retrieve(user_input)
+        context = "\n".join([doc.page_content for doc in docs])
 
-    for doc in relevant_docs:
-        fname = doc.metadata.get("source")
-        para_idx = doc.metadata.get("para_index")
-        if fname is None or para_idx is None:
-            continue
-        path = os.path.join(DOCUMENTS_FOLDER, fname)
-        triplets = extract_text_image_link_pairs(path)
-        for offset in range(-3, 4):
-            nearby_idx = para_idx + offset
-            if 0 <= nearby_idx < len(triplets):
-                _, imgs, links = triplets[nearby_idx]
-                for i, img in enumerate(imgs):
-                    img_id = f"{fname}::img{nearby_idx}_{i}"
-                    if img_id not in seen_ids:
-                        image_ids.append(img_id)
-                        seen_ids.add(img_id)
-                related_links.update(links)
+        answer = "" 
 
-    return {
-        "answer": result["answer"],
-        "image_ids": image_ids,
-        "related_links": list(related_links)
-    }
+        # Try LangChain first
+        try:
+            answer = ""
+            for chunk in chain.stream({"input": user_input, "context": context}):
+                # Only add to answer if chunk has a non-empty 'answer' key
+                if isinstance(chunk, dict):
+                    # Add only if 'answer' exists and is not empty
+                    if "answer" in chunk and chunk["answer"]:
+                        answer += chunk["answer"]
+                    # Ignore dicts with only 'answer' key and empty value
+                    elif set(chunk.keys()) == {"answer"}:
+                        continue
+                    # Ignore dicts with only 'input' or 'context' keys
+                    elif set(chunk.keys()).issubset({"input", "context"}):
+                        continue
+                    else:
+                        # For any other dict, add its string representation
+                        answer += str(chunk)
+                else:
+                    answer += str(chunk)
+        except Exception as chain_error:
+            print("Chain failed, falling back to Ollama:", chain_error)
+            response = requests.post("http://localhost:11434/api/generate", json={
+                "model": "llama3",
+                "prompt": user_input,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 200,
+                    "repeat_penalty": 1.1
+                },
+                "stream": False
+            })
+            response.raise_for_status()
+            answer = response.json().get("response", "")
+
+        # Image/link processing (same as before)
+        relevant_docs = docs
+        image_ids = []
+        related_links = set()
+        seen_ids = set()
+
+        for doc in relevant_docs:
+            fname = doc.metadata.get("source")
+            para_idx = doc.metadata.get("para_index")
+            if fname is None or para_idx is None:
+                continue
+            path = os.path.join(DOCUMENTS_FOLDER, fname)
+            triplets = extract_text_image_link_pairs(path)
+            for offset in range(-3, 4):
+                nearby_idx = para_idx + offset
+                if 0 <= nearby_idx < len(triplets):
+                    _, imgs, links = triplets[nearby_idx]
+                    for i, img in enumerate(imgs):
+                        img_id = f"{fname}::img{nearby_idx}_{i}"
+                        if img_id not in seen_ids:
+                            image_ids.append(img_id)
+                            seen_ids.add(img_id)
+                    related_links.update(links)
+
+        # ✅ Now return all together
+        return {
+            "answer": answer,
+            "image_ids": image_ids,
+            "related_links": list(related_links)
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    
 
 @app.post("/signin")
 def signin(user: SignInRequest):

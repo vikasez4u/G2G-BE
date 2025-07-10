@@ -3,7 +3,7 @@ from io import BytesIO
 from PIL import Image
 from docx import Document
 from langchain_ollama import ChatOllama
-from langchain_chroma import Chroma  
+from langchain_chroma import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -11,10 +11,16 @@ from langchain.chains import create_retrieval_chain
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain.docstore.document import Document as LCDocument
 from xml.etree.ElementTree import tostring
+from functools import lru_cache
 
+#import streamlit as st
 
 CHROMA_DB_DIR = "./sql_chroma_db"
 DOCUMENTS_FOLDER = "./documents"
+
+embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+vector_store = Chroma(persist_directory="CHROMA_DB_DIR", embedding_function=embedder)
+retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3, "fetch_k": 6, "lambda_mult": 0.8})
 
 def extract_text_image_link_pairs(doc_path):
     from lxml import etree
@@ -80,7 +86,6 @@ def ingest():
     all_chunks = []
     
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
     for filename in os.listdir(DOCUMENTS_FOLDER):
         if filename.endswith(".docx"):
@@ -101,24 +106,88 @@ def ingest():
     print("✅ Chroma DB created and persisted.")
 
 
+
 def build_chain():
-    model = ChatOllama(model="llama3.2", temperature=0.4)
-    embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+    print("Building Chain")
+    model = ChatOllama(model="llama3.2", temperature=0.4,
+                       options={
+            "num_predict": 200,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1
+        }
+)
     prompt = PromptTemplate.from_template("""
-You are a friendly and helpful virtual assistant for Accenture.
-Your tone must be warm, professional, and formal at all times.
-Behavior Rules:
-Greet the user only at the start of the first conversation with a friendly tone. Use "Hello" only once.
-During the conversation:
-Do not repeat greetings (e.g., no "hello" or "thank you" mid-chat).
-Answer questions accurately, concisely, and contextually.
-Stick strictly to the user's question and context.
-Use bullet points when the answer involves multiple parts.
-Give detailed explanations only if the user asks for them.
-Use emojis sparingly to remain warm yet professional.
-Provide links or images only if directly relevant to the question.
-Offer help proactively if it’s the user’s first message or beginning of a conversation.
-End the conversation with a polite thank-you and positive closing.
+SYSTEM ROLE:
+You are a professional and friendly virtual assistant for Accenture.
+Your tone is warm, formal, and helpful.
+
+BEHAVIOR RULES:
+- Greet only once at the beginning of a new conversation with “Hello.”
+- Avoid repeated greetings or thanks mid-chat.
+- Use markdown formatting in all responses.
+- Use emojis only when they enhance clarity or warmth.
+- Use bullet points to list items or steps.
+- Use section headings for clarity.
+- Use short paragraphs for readability.
+- Use concise and clear language.
+- Base every response strictly on provided documents.
+- If documents has image or link for that question, include them in the response.
+- If the answer is not in the documents, reply with: “Reach out to Respective POCs.”
+- Offer help proactively only at the beginning of a new conversation.
+- End every response with a polite thank-you and positive closing.
+
+CONDITIONAL LOGIC:
+Respond based only on the user's query and provided documents.
+
+- If the user asks about:
+    - “leave balance”
+    - “leave history”
+    - “leave calculation”
+    - “leave entitlements”
+→ Provide entitlement breakdown or usage summary from documents.
+
+- If the user asks about:
+    - “leave policy”
+    - “leave types”
+    - “leave guidelines”
+    - “leave FAQs”
+→ Summarize relevant policies only from documented content.
+
+- If the user asks about:
+    - “leave application”
+    - “leave status”
+    - “leave request”
+    - “leave approvals”
+    - “leave process”
+→ Guide through documented application process and workflows.
+
+- If the user asks about:
+    - “leave system”
+    - “leave notifications”
+    - “leave reminders”
+    - “leave assistance”
+    - “leave support”
+    - “leave updates”
+→ Describe documented notification pathways or support steps.
+
+- If the user asks about:
+    - “leave documentation”
+    - “leave forms”
+    - “leave procedures”
+    - “leave deadlines”
+→ Share required forms, timelines, and procedural steps per documentation.
+
+- If the user asks about:
+    - “leave queries”
+    - “leave resources”
+    - “leave contacts”
+    - “leave feedback”
+    - “leave issues”
+→ Direct to relevant contacts or escalate using: “Reach out to Respective POCs.”
+
+FALLBACK RULE:
+- If the query does not match any condition or information is missing from the documents:
+→ Reply with: “Please clarify your question or Reach out to Respective POCs.”
 
 Input:
 {input}
@@ -129,13 +198,22 @@ Context:
 Answer:
 """)
 
-    vector_store = Chroma(persist_directory=CHROMA_DB_DIR, embedding_function=embedder)
     retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3, "fetch_k": 6, "lambda_mult": 0.8})
     doc_chain = create_stuff_documents_chain(model, prompt)
     # return create_retrieval_chain(retriever, doc_chain), retriever
     return create_retrieval_chain(retriever, doc_chain), retriever, model
 
+@lru_cache(maxsize=128)
+def cached_retrieve(user_input: str):
+    return retriever.get_relevant_documents(user_input)
+
+
 ingest()
 chat_chain, chat_retriever,llm = build_chain()
 
-
+#query = st.text_input("Ask a question:")
+#if query:
+#    chat_chain, chat_retriever,llm = build_chain()
+#    response = chat_chain.invoke({"input": query})
+#    st.write("### Answer")
+#    st.write(response)
