@@ -17,7 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable
 from langchain_community.chat_models import ChatOllama
 
-from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER, cached_retrieve
+from app import build_chain, extract_text_image_link_pairs, DOCUMENTS_FOLDER, ingest
 
 import jwt
 from jwt import PyJWKClient
@@ -27,8 +27,8 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
-    # allow_origins=["http://localhost:5173","http://localhost:3000", "https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
+    #allow_origins=["https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
+    allow_origins=["http://localhost:5173","http://localhost:3000", "https://g2g-chatbot-geakehf4aqamfcfb.eastasia-01.azurewebsites.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +48,7 @@ chain, retriever, llm = build_chain()
 # === MODELS ===
 class QueryRequest(BaseModel):
     question: str
+    username: str
 
 class FeedbackRequest(BaseModel):
     question: str
@@ -75,6 +76,7 @@ class SessionFetchRequest(BaseModel):
 
 # === DB CONNECTION ===
 def get_connection():
+    #print(pyodbc.drivers())
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
         "SERVER=clean-prod.database.windows.net;"
@@ -112,9 +114,10 @@ async def ask_ollama(request: Request):
     body = await request.json()
     prompt = body.get("prompt", "")
 
-    response = requests.post("http://ollama:11434/api/generate", json={
+    response = requests.post("http://localhost:11434/api/generate", json={
         "model": "llama3.2",
-        "prompt": prompt
+        "prompt": prompt,
+        "stream": false
     })
     print("Ollama response status:", response.status_code)
     print("Ollama response text:", response.text)
@@ -142,83 +145,83 @@ def login(authorization: str = Header(...)):
 
 
 # === CHAT ===
+GREETINGS = re.compile(r"\b(hi|hello|hey|good morning|good afternoon|good evening|greetings)\b", re.I)
+
 @app.post("/chat")
 def chat(req: QueryRequest):
+    
     try:
-        user_input = req.question
+        user_input = req.question.strip()
+        username = req.username
         print("Input schema:", chain.input_schema.schema())
+        print("User input:", user_input)
+        # If greeting or empty, return process flows only
+        if not user_input or GREETINGS.search(user_input):
+            # Fetch process flows from DB or API
+            process_flows = getChatProcessFlow()
+            doc_list_str = f"""Hi {username}, \n\n Welcome to G2G Chat bot Agent!! \n\n I'd be happy to help you with process flows.\n\nTo get started, I can offer assistance with the following processes:
+                {'\n'.join(f" {f}" for f in process_flows["chat_process_flows"]) if process_flows.get("chat_process_flows") else "(No process flows available)"}"""
+            return {
+                "answer": doc_list_str,
+                "image_ids": [],
+                "related_links": []
+            }
+        else:
+            # Cached document retrieval
+            relevant_docs_sources = set()
+            unique_docs = []
+            relevant_docs = retriever.invoke(user_input)
+            #print(relevant_docs)  # Print retrieved documents for debugging
+            for doc in relevant_docs:
+                #print(doc.page_content)
+                source = doc.metadata.get("source", "")
+                # Defensive: avoid adding bool or non-str types to set
+                if isinstance(source, str) and source and (not isinstance(source, bool)) and source not in relevant_docs_sources:
+                    relevant_docs_sources.add(source)
+                    unique_docs.append(doc)
 
-        # Cached document retrieval
-        docs = cached_retrieve(user_input)
-        context = "\n".join([doc.page_content for doc in docs])
+            print("Relevant document sources:", relevant_docs_sources)
+            input_data = {
+                "input_documents": unique_docs,  # result of similarity_search or retriever
+                "input": user_input
+            }
 
-        answer = "" 
+            result = chain.invoke(input_data)
 
-        # Try LangChain first
-        try:
-            answer = ""
-            for chunk in chain.stream({"input": user_input, "context": context}):
-                # Only add to answer if chunk has a non-empty 'answer' key
-                if isinstance(chunk, dict):
-                    # Add only if 'answer' exists and is not empty
-                    if "answer" in chunk and chunk["answer"]:
-                        answer += chunk["answer"]
-                    # Ignore dicts with only 'answer' key and empty value
-                    elif set(chunk.keys()) == {"answer"}:
-                        continue
-                    # Ignore dicts with only 'input' or 'context' keys
-                    elif set(chunk.keys()).issubset({"input", "context"}):
-                        continue
-                    else:
-                        # For any other dict, add its string representation
-                        answer += str(chunk)
-                else:
-                    answer += str(chunk)
-        except Exception as chain_error:
-            print("Chain failed, falling back to Ollama:", chain_error)
-            response = requests.post("http://localhost:11434/api/generate", json={
-                "model": "llama3",
-                "prompt": user_input,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 200,
-                    "repeat_penalty": 1.1
-                },
-                "stream": False
-            })
-            response.raise_for_status()
-            answer = response.json().get("response", "")
+            # Image/link processing (same as before)
+            #relevant_docs = docs
+            image_ids = []
+            related_links = set()
+            seen_ids = set()
 
-        # Image/link processing (same as before)
-        relevant_docs = docs
-        image_ids = []
-        related_links = set()
-        seen_ids = set()
+            for doc in unique_docs:
+                fname = doc.metadata.get("source")
+                para_idx = doc.metadata.get("para_index")
+                if fname is None or para_idx is None:
+                    continue
+                try:
+                    para_idx = int(para_idx)
+                except Exception:
+                    continue
+                path = os.path.join(DOCUMENTS_FOLDER, fname)
+                triplets = extract_text_image_link_pairs(path)
+                for offset in range(-3, 4):
+                    nearby_idx = para_idx + offset
+                    if 0 <= nearby_idx < len(triplets):
+                        _, imgs, links = triplets[nearby_idx]
+                        for i, img in enumerate(imgs):
+                            img_id = f"{fname}::img{nearby_idx}_{i}"
+                            if img_id not in seen_ids:
+                                image_ids.append(img_id)
+                                seen_ids.add(img_id)
+                        related_links.update(links)
 
-        for doc in relevant_docs:
-            fname = doc.metadata.get("source")
-            para_idx = doc.metadata.get("para_index")
-            if fname is None or para_idx is None:
-                continue
-            path = os.path.join(DOCUMENTS_FOLDER, fname)
-            triplets = extract_text_image_link_pairs(path)
-            for offset in range(-3, 4):
-                nearby_idx = para_idx + offset
-                if 0 <= nearby_idx < len(triplets):
-                    _, imgs, links = triplets[nearby_idx]
-                    for i, img in enumerate(imgs):
-                        img_id = f"{fname}::img{nearby_idx}_{i}"
-                        if img_id not in seen_ids:
-                            image_ids.append(img_id)
-                            seen_ids.add(img_id)
-                    related_links.update(links)
-
-        # ✅ Now return all together
-        return {
-            "answer": answer,
-            "image_ids": image_ids,
-            "related_links": list(related_links)
-        }
+            # ✅ Now return all together
+            return {
+                "answer":  result["answer"],
+                "image_ids": image_ids,
+                "related_links": list(related_links)
+            }
 
     except Exception as e:
         traceback.print_exc()
@@ -493,6 +496,9 @@ async def upload_file(file: UploadFile = File(...)):
             image_ids.append(f"{file.filename}::img0_0")
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
+        ingest()
+        global chain, retriever, llm
+        chain, retriever, llm = build_chain()
         return {
             "filename": file.filename,
             "message": "File uploaded successfully",
@@ -550,3 +556,53 @@ def get_suggestions(q: str = Query(..., min_length=2)):
         return suggestions[:3]
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to generate suggestions")
+
+
+@app.post("/chatProcessFlow")
+def chatProcessFlow(req: SessionFetchRequest):
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # if user exists
+        cursor.execute("SELECT ID FROM USER_SETTINGS_TABLE WHERE EMAIL_ID = ?", (req.email,))
+        existing_user = cursor.fetchone()
+
+        if not existing_user:
+            # Insert user
+            cursor.execute("""
+                INSERT INTO CHAT_PROCESS_FLOW_TABLE (CHAT_PROCESS_NAME, CREATED_BY)
+                VALUES (?, ?)
+            """, (req.chatProcessName, req.username))
+
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+@app.get("/getChatProcessFlow")
+def getChatProcessFlow():
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Fetch all chat process flows
+        cursor.execute("SELECT CHAT_PROCESS_NAME FROM CHAT_PROCESS_FLOW_TABLE")
+        chat_process_flows = cursor.fetchall()
+        chat_process_list = [row[0] for row in chat_process_flows]
+        if not chat_process_list:
+            raise HTTPException(status_code=404, detail="No chat process flows found")
+        print(f"Chat process flows found: {chat_process_list}")
+        return {"chat_process_flows": chat_process_list}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
