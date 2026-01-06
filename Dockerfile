@@ -46,8 +46,8 @@ RUN pip install --upgrade pip \
 # 📂 Copy app code
 COPY . .
 
-# 🌐 Expose FastAPI port
-EXPOSE 8000
+# 🌐 Expose FastAPI port and Ollama ports
+EXPOSE 8000 11434
 
 # 🚀 Startup script for Ollama & FastAPI
 RUN echo '#!/bin/bash\n\
