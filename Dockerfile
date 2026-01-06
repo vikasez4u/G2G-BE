@@ -13,22 +13,24 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* \
     && apt-get update --fix-missing
 
 # 🛠 Install system dependencies
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     curl \
     gnupg \
+    apt-transport-https \
     libssl-dev \
     libffi-dev
 
-# 🏢 Microsoft SQL packages setup
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
-    && curl https://packages.microsoft.com/config/debian/10/prod.list > /etc/apt/sources.list.d/mssql-release.list \
-    && apt-get update --fix-missing \
+# 🏢 Microsoft SQL packages setup (Debian 11 / bullseye)
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/microsoft.gpg \
+    && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y \
         msodbcsql17 \
         unixodbc \
         unixodbc-dev
+
 
 # 🤖 Ollama installation
 RUN curl -fsSL https://ollama.com/install.sh | sh
