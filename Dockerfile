@@ -4,35 +4,31 @@ FROM python:3.13-slim
 # 🔧 Environment settings
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
 
 # 📁 Working directory
 WORKDIR /app
 
-# 📦 Clean and update apt cache and install minimal system dependencies
-RUN apt-get update --fix-missing \
-    && apt-get install -y --no-install-recommends \
-       ca-certificates \
-       curl \
-       gnupg \
-       lsb-release \
-       build-essential \
-       git \
-       libssl-dev \
-       libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
+# 📦 Clean and update apt cache
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && apt-get update --fix-missing
 
-# 🏢 Microsoft SQL packages setup (no apt-key)
-# - write Microsoft GPG key into trusted keyring
-# - add the Microsoft prod.list
-# - update and install msodbcsql17, unixodbc, unixodbc-dev
-RUN set -eux; \
-    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/microsoft.gpg; \
-    curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list -o /etc/apt/sources.list.d/mssql-release.list || \
-      curl -fsSL https://packages.microsoft.com/config/debian/11/prod.list -o /etc/apt/sources.list.d/mssql-release.list; \
-    apt-get update --fix-missing; \
-    ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql17 unixodbc unixodbc-dev; \
-    rm -rf /var/lib/apt/lists/*
+# 🛠 Install system dependencies
+RUN apt-get install -y \
+    build-essential \
+    git \
+    curl \
+    gnupg \
+    libssl-dev \
+    libffi-dev
+
+# 🏢 Microsoft SQL packages setup
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+    && curl https://packages.microsoft.com/config/debian/10/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update --fix-missing \
+    && ACCEPT_EULA=Y apt-get install -y \
+        msodbcsql17 \
+        unixodbc \
+        unixodbc-dev
 
 # 🤖 Ollama installation
 RUN curl -fsSL https://ollama.com/install.sh | sh
