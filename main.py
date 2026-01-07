@@ -117,7 +117,7 @@ async def ask_ollama(request: Request):
     response = requests.post("http://localhost:11434/api/generate", json={
         "model": "llama3.2",
         "prompt": prompt,
-        "stream": false
+        "stream": False
     })
     print("Ollama response status:", response.status_code)
     print("Ollama response text:", response.text)
